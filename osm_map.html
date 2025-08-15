@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+<title>Yemen Roads Map</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html,body,#map{height:100%;margin:0;padding:0}
+  .leaflet-control-attribution { font-size: 11px; }
+  .toolbar{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);
+    background:#fff;border-radius:999px;box-shadow:0 2px 12px rgba(0,0,0,.15);padding:6px 8px;display:flex;gap:6px}
+  .btn{border:0;border-radius:999px;padding:6px 10px;font:600 12px/1.2 system-ui;cursor:pointer}
+  .btn.active{outline:2px solid #1976d2}
+</style>
+
+<div id="map"></div>
+<div id="toolbar" class="toolbar">
+  <button class="btn active" data-type="pothole" style="background:#e74c3c;color:#fff">حُفرة</button>
+  <button class="btn" data-type="bump" style="background:#f39c12;color:#fff">مطب</button>
+  <button class="btn" data-type="maintenance" style="background:#16a085;color:#fff">صيانة</button>
+  <button class="btn" id="clear">مسح</button>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  // 1) خريطة اليمن كافتراضي (المستخدم يقدر يزوّم بحرية)
+  const map = L.map('map', {
+    zoomControl:true, scrollWheelZoom:true, touchZoom:true, dragging:true
+  }).setView([15.55, 48.52], 6); // وسط اليمن تقريباً
+
+  // بلاط OSM المجاني
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution:'© OpenStreetMap'
+  }).addTo(map);
+
+  // ========= أزرار أنواع البلاغات وإضافة نقاط بالضغط =========
+  let currentType = 'pothole';
+  const colorFor = t => ({ pothole:'#e74c3c', bump:'#f39c12', maintenance:'#16a085' }[t]||'#2980b9');
+  const iconFor = t => L.divIcon({
+    className:'custom-marker',
+    html:`<div style="width:16px;height:16px;border-radius:50%;
+      background:${colorFor(t)};border:2px solid #fff;box-shadow:0 0 0 2px ${colorFor(t)}66"></div>`,
+    iconSize:[16,16], iconAnchor:[8,8]
+  });
+
+  const markers = [];
+  const save = () => localStorage.setItem('yrg_markers', JSON.stringify(markers.map(m=>m.data)));
+  const load = () => { try { return JSON.parse(localStorage.getItem('yrg_markers')||'[]'); } catch { return []; } };
+
+  function addMarker(latlng, type){
+    const mk = L.marker(latlng, {icon:iconFor(type)})
+      .bindPopup(`النوع: ${type}<br>${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`)
+      .addTo(map);
+    mk.data = {lat:latlng.lat, lng:latlng.lng, type};
+    markers.push(mk); save();
+  }
+
+  load().forEach(m => addMarker({lat:m.lat,lng:m.lng}, m.type));
+  map.on('click', e => addMarker(e.latlng, currentType));
+
+  document.getElementById('toolbar').addEventListener('click', ev=>{
+    const b = ev.target.closest('button'); if(!b) return;
+    if(b.id==='clear'){
+      markers.forEach(m=>map.removeLayer(m)); markers.length=0; save(); return;
+    }
+    const t = b.dataset.type;
+    if(t){ currentType=t; document.querySelectorAll('.btn').forEach(x=>x.classList.remove('active')); b.classList.add('active'); }
+  });
+
+  // ========= تتبع موقع المستخدم + زر إعادة التمركز =========
+  let userMarker=null, accuracyCircle=null;
+  const pathCoords=[], pathLine=L.polyline(pathCoords,{color:'#1976d2',weight:4,opacity:.7}).addTo(map);
+
+  const recenterBtn = L.control({position:'topleft'});
+  recenterBtn.onAdd = function(){
+    const div = L.DomUtil.create('div','leaflet-bar');
+    div.innerHTML = '<a href="#" title="موقعي">📍</a>';
+    Object.assign(div.style,{fontSize:'18px',textAlign:'center',lineHeight:'26px',width:'30px',height:'30px'});
+    div.onclick = (e)=>{ e.preventDefault(); locateAndFollow(true); };
+    return div;
+  };
+  recenterBtn.addTo(map);
+
+  function onLocationFound(e){
+    const {latlng, accuracy} = e;
+    if(!userMarker){
+      userMarker = L.marker(latlng,{icon:L.divIcon({
+        className:'', html:'<div style="width:18px;height:18px;border-radius:50%;background:#2ecc71;border:3px solid #fff;box-shadow:0 0 0 2px #2ecc7166"></div>',
+        iconSize:[18,18], iconAnchor:[9,9]
+      })}).addTo(map);
+      accuracyCircle = L.circle(latlng,{radius:accuracy,color:'#2ecc71',fillOpacity:.08,weight:1}).addTo(map);
+      map.setView(latlng, 16);
+    } else {
+      userMarker.setLatLng(latlng);
+      accuracyCircle.setLatLng(latlng).setRadius(accuracy);
+    }
+    pathCoords.push([latlng.lat, latlng.lng]); pathLine.setLatLngs(pathCoords);
+  }
+  function onLocationError(err){ console.warn('Location error:', err.message); }
+
+  function locateAndFollow(setView){
+    map.locate({ watch:true, setView, maxZoom:16, enableHighAccuracy:true, timeout:10000 })
+       .on('locationfound', onLocationFound)
+       .on('locationerror', onLocationError);
+  }
+  // يبدأ بدون تحريك الكاميرا، والزر 📍 يعيد التمركز
+  locateAndFollow(false);
+</script>
+</html>
